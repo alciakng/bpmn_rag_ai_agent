@@ -1,0 +1,43 @@
+---
+version: "3.8"
+services:
+  # bpmn image in MinIO object storage
+  minio:
+    image: minio/minio
+    container_name: bpmn-minio
+    hostname: minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_storage:/data
+    environment:
+      MINIO_ACCESS_KEY: minio_access_key
+      MINIO_SECRET_KEY: minio_secret_key
+    command: server --console-address ":9001" /data
+
+  redis:
+      image: redis:7-alpine
+      container_name: bpmn-redis
+      hostname: redis
+      ports:
+        - "6379:6379"
+      volumes:
+        - redis_data:/data
+      environment:
+        - REDIS_PASSWORD=redis_password
+      command: >
+        redis-server 
+        --requirepass redis_password
+        --appendonly yes
+        --appendfsync everysec
+      restart: unless-stopped
+      healthcheck:
+        test: ["CMD", "redis-cli", "-a", "redis_password", "ping"]
+        interval: 30s
+        timeout: 10s
+        retries: 3
+
+volumes:
+  minio_storage:
+  redis_data:

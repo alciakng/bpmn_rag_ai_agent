@@ -1,0 +1,10 @@
+bpmn:
+  img_path: data/img
+  xml_path: data/xml
+datalake:
+  endpoint: localhost:9000
+  bucket_name_1: bpmn-img
+  bucket_name_2: bpmn-xml
+  folder_name: img
+  access_key: minio_access_key
+  secret_key: minio_secret_key

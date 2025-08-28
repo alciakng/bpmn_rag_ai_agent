@@ -1,0 +1,88 @@
+# 예시 order to cash
+MERGE (p:Process {key:"OTC_CUST_QUOTATION", name:"OTC - Customer Quotation"})
+MERGE (a1:Activity {key:"CREATE_QUOT", name:"Create quotation"})
+MERGE (a2:Activity {key:"ENTER_HDR_POS", name:"Enter header and position data"})
+MERGE (a3:Activity {key:"EXEC_PRICING", name:"Execute pricing"})
+MERGE (g1:Gateway {key:"G_REVIEW_PRICING", type:"XOR", name:"Review pricing needed?"})
+MERGE (a4:Activity {key:"CALC_PRICE_MAN", name:"Calculate price manually"})
+MERGE (a5:Activity {key:"MAINT_PRICE_MAN", name:"Maintain price manually"})
+MERGE (g2:Gateway {key:"G_DECIDE_TX", type:"XOR", name:"Decide about transmission"})
+MERGE (a6:Activity {key:"PRINT", name:"Print quotation"})
+MERGE (a7:Activity {key:"SEND_EMAIL", name:"Send quotation by email"})
+MERGE (a8:Activity {key:"TRANSFER", name:"Transfer quotation"})
+MERGE (g3:Gateway {key:"G_CUST_RESPONSE", type:"XOR", name:"Customer response"})
+MERGE (a9:Activity {key:"CHANGE_QUOT", name:"Change quotation"})
+MERGE (a10:Activity {key:"KEEP_REJECT_REASON", name:"Maintain reason for rejection"})
+
+MERGE (a10:Activity {key:"KEEP_REJECT_REASON", name:"Maintain reason for rejection"})
+MERGE (a10:Activity {key:"KEEP_REJECT_REASON", name:"Maintain reason for rejection"})
+MERGE (a10:Activity {key:"KEEP_REJECT_REASON", name:"Maintain reason for rejection"})
+MERGE (a10:Activity {key:"KEEP_REJECT_REASON", name:"Maintain reason for rejection"})
+
+MERGE (e3:Event {key:'EVT_ACCEPT_QUOT', type:'End'})
+  SET e3.name = 'Quotation accepted'
+
+MERGE (a1)-[:NEXT {seq:10}]->(a2)
+MERGE (a2)-[:NEXT {seq:20}]->(a3)
+MERGE (a3)-[:NEXT {seq:30}]->(g1)
+MERGE (g1)-[:ROUTE {condition:"pricing_needed"}]->(a4)
+MERGE (a4)-[:NEXT {seq:40}]->(a5)
+MERGE (a5)-[:NEXT {seq:50}]->(g2)
+MERGE (g1)-[:ROUTE {condition:"no_issue"}]->(g2)
+MERGE (g2)-[:ROUTE {method:"print"}]->(a6)
+MERGE (g2)-[:ROUTE {method:"email"}]->(a7)
+MERGE (a6)-[:NEXT {seq:60}]->(a8)
+MERGE (a7)-[:NEXT {seq:60}]->(a8)
+MERGE (a8)-[:NEXT {seq:70}]->(g3)
+MERGE (g3)-[:ROUTE {resp:"accept"}]->(e3)
+MERGE (g3)-[:ROUTE {resp:"request_change"}]->(a9)
+MERGE (a9)-[:NEXT {seq:80}]->(a10)
+
+
+# ROLE 
+MERGE (sales:Role {name:"Sales Employee"})
+MERGE (svc:Role {name:"Service Agent"})
+
+# RACI 연결 예시 
+WITH ['R','I'] AS types
+MATCH (a:Activity {key:'CREATE_QUOT'})
+MATCH (sales:Role {name:'Sales Employee'})
+UNWIND types AS t
+MERGE (sales)-[:RACI {type:t}]->(a);
+
+# 초기 이벤트 노드
+# 시작 이벤트 2개 + XOR 게이트웨이(merge) + (선택) 다음 액티비티 연결
+MERGE (e1:Event {key:'EVT_CUST_INQUIRY_SPEC', type:'Start'})
+  SET e1.name = 'Customer inquiry according to specification document received (EN)'
+
+MERGE (e2:Event {key:'EVT_REQ_MATERIAL_QUOT', type:'Start'})
+  SET e2.name = 'Customer requires material quotation (EN)'
+  
+MERGE (g_in:Gateway {key:'G_INTAKE_XOR', type:'XOR'})
+  SET g_in.name = 'Intake merge (XOR)'
+
+MERGE (e1)-[:NEXT {label:'start'}]->(g_in)
+MERGE (e2)-[:NEXT {label:'start'}]->(g_in)
+
+# 'Create quotation' 연결  
+MERGE (a0:Activity {key:'CREATE_QUOT'}) SET a0.name = 'Create quotation (EN)'
+MERGE (g_in)-[:NEXT]->(a0);
+
+
+# 종료 이벤트 노드 
+# 변경 경로 액티비티들 + 마지막 종료 이벤트
+MERGE (a_chg:Activity {key:'CHANGE_QUOT'})         SET a_chg.name  = 'Change quotation (EN)'
+MERGE (a_keep:Activity {key:'KEEP_REJECT_REASON'}) SET a_keep.name = 'Maintain reason for rejection (EN)'
+MERGE (e_save:Event {key:'EVT_SAVE_CHANGES', type:'End'})
+  SET e_save.name = 'Save changes (EN)'
+
+# 게이트웨이에서의 분기(ROUTE) — 조건/응답을 속성으로 명시
+MERGE (g_resp)-[:ROUTE {resp:'request_change'}]->(a_chg)
+
+# 변경 경로의 직선 흐름
+MERGE (a_chg)-[:NEXT]->(a_keep)
+MERGE (a_keep)-[:NEXT]->(e_save);
+
+
+
+

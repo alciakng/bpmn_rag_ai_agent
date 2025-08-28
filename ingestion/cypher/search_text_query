@@ -1,0 +1,108 @@
+// -----------------------------------------------
+// 1. Activity용 searchText 생성 (NEXT + ROUTE 포함)
+// -----------------------------------------------
+MATCH (a:Activity)
+OPTIONAL MATCH (pr)-[:NEXT|ROUTE]->(a)
+OPTIONAL MATCH (a)-[:NEXT|ROUTE]->(nx)
+OPTIONAL MATCH (r:Role)-[ra:RACI]->(a)
+WITH a,
+     collect(DISTINCT pr.name) AS prevs,
+     collect(DISTINCT nx.name) AS nexts,
+     collect(DISTINCT r.name + '(' + ra.type + ')') AS raci
+SET a.searchText = trim(apoc.text.join([
+  'Activity', a.name, a.key,
+  'RACI:', apoc.text.join(raci,'; '),
+  'Prev:', apoc.text.join(prevs,'; '),
+  'Next:', apoc.text.join(nexts,'; ')
+],' '));
+
+// --------------------------
+// 2. Gateway searchText 생성
+// --------------------------
+MATCH (g:Gateway)
+WITH g,
+     [ (g)-[rt:ROUTE]->(:Activity| Event)
+       WHERE any(x IN [rt.method, rt.condition, rt.resp, rt.label]
+                 WHERE x IS NOT NULL AND toString(x) <> '')
+       | trim(apoc.text.join([
+           coalesce(rt.label,''), 
+           coalesce(rt.method,''), 
+           coalesce(rt.condition,''), 
+           coalesce(rt.resp,'')
+         ], ' '))
+     ] AS routes_raw
+WITH g, apoc.coll.toSet([r IN routes_raw WHERE r <> '' ]) AS routes
+SET g.searchText = trim(apoc.text.join([
+  'Gateway', coalesce(g.name,''), coalesce(g.key,''), coalesce(g.type,''),
+  'Routes:', apoc.text.join(routes, '; ')
+], ' '));
+
+// -------------------------
+// 3. Event용 searchText 생성
+// -------------------------
+// Event 노드의 searchText 생성 (Prev/Next 통일)
+MATCH (e:Event)
+
+// 이전: NEXT로 들어오는 Activity
+OPTIONAL MATCH (pa:Activity)-[:NEXT]->(e)
+WITH e, collect(DISTINCT pa.name) AS prev_from_next
+
+// 이전: ROUTE로 들어오는 Gateway
+OPTIONAL MATCH (pg:Gateway)-[:ROUTE]->(e)
+WITH e, prev_from_next, collect(DISTINCT pg.name) AS prev_from_route
+
+// 다음: NEXT로 나가는 모든 노드(액티비티/게이트웨이/이벤트)
+OPTIONAL MATCH (e)-[:NEXT]->(nx:Activity|Gateway|Event)
+WITH e,
+     apoc.coll.toSet(prev_from_next + prev_from_route) AS prevs_raw,
+     collect(DISTINCT nx.name) AS nexts_raw
+
+// 정렬/정리 + 길이 제한(너무 길어지는 것 방지)
+WITH e,
+     apoc.coll.sort([x IN prevs_raw WHERE x IS NOT NULL AND x <> ''])[0..8] AS prevs,
+     apoc.coll.sort([x IN nexts_raw WHERE x IS NOT NULL AND x <> ''])[0..8] AS nexts
+
+SET e.searchText = trim(apoc.text.join([
+  'Event', coalesce(e.name,''), coalesce(e.key,''),
+  'Prev:', apoc.text.join(prevs, '; '),
+  'Next:', apoc.text.join(nexts, '; ')
+], ' '));
+
+
+// ---------------------------
+// 4. Process용 searchText 생성
+// ---------------------------
+// :Process의 전체 설명 텍스트 생성 및 저장
+MATCH (p:Process {key: $process_key})
+
+// 1) 소속 노드 이름 수집
+OPTIONAL MATCH (p)-[:CONTAINS]->(n)
+WITH p,
+     collect(DISTINCT labels(n)[0] + ': ' + coalesce(n.name, n.key)) AS node_lines
+
+// 2) 게이트웨이 분기 라인 수집
+OPTIONAL MATCH (p)-[:CONTAINS]->(gw:Gateway)-[r:ROUTE]->(t)
+WITH p, node_lines,
+     collect('ROUTE ' + coalesce(gw.name, gw.key) + ' -> ' + coalesce(t.name, t.key) +
+             CASE
+               WHEN r.condition IS NOT NULL OR r.method IS NOT NULL OR r.resp IS NOT NULL
+               THEN ' [' +
+                 coalesce('cond=' + r.condition + ' ', '') +
+                 coalesce('method=' + r.method + ' ', '') +
+                 coalesce('resp=' + r.resp + ' ', '') +
+               ']'
+               ELSE ''
+             END) AS route_lines
+
+// 3) RACI 라인 수집
+OPTIONAL MATCH (p)-[:CONTAINS]->(a:Activity)<-[ra:RACI]-(role:Role)
+WITH p, node_lines, route_lines,
+     collect('RACI ' + role.name + ':' + coalesce(ra.type, '') +
+             ' -> ' + coalesce(a.name, a.key)) AS raci_lines
+
+// 4) 최종 텍스트로 합치기
+WITH p, node_lines + route_lines + raci_lines AS lines
+WITH p,
+     apoc.text.join([l IN lines WHERE l IS NOT NULL AND l <> '' | l], '\n') AS full_text
+
+SET p.searchText      = full_text
